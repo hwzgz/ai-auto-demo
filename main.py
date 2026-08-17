@@ -1,13 +1,18 @@
 import os
+import sys
 import json
 import sqlite3
 from dotenv import load_dotenv
 from openai import OpenAI
 from typing import List, Dict, Any
 
-# Windows编码修复
+# Windows编码修复 - 强制stdout使用UTF-8
 if os.name == "nt":
     os.environ["PYTHONIOENCODING"] = "utf-8"
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 
 load_dotenv()
 
@@ -65,6 +70,15 @@ tools = [
         }
     }
 ]
+
+def safe_print(*args, **kwargs):
+    """兼容Windows GBK控制台的print包装，自动处理无法编码的字符"""
+    try:
+        print(*args, **kwargs)
+    except UnicodeEncodeError:
+        text = "".join(str(a) for a in args)
+        safe_text = text.encode("utf-8", errors="replace").decode("utf-8")
+        print(safe_text, **kwargs)
 
 def call_tool(name: str, args: dict) -> str:
     try:
@@ -143,8 +157,8 @@ def run_worker(sub_task: str) -> str:
             func_name = tc.function.name
             func_args = json.loads(tc.function.arguments)
             tool_result = call_tool(func_name, func_args)
-            print(f"\n🔧 [Worker]调用工具 {func_name} 参数:{func_args}")
-            print(f"🔧 [Worker]工具返回：{tool_result}")
+            safe_print(f"\n🔧 [Worker]调用工具 {func_name} 参数:{func_args}")
+            safe_print(f"🔧 [Worker]工具返回：{tool_result}")
             messages.append(msg)
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": tool_result})
         final_resp = client.chat.completions.create(model=MODEL, messages=messages)
@@ -175,8 +189,8 @@ def run_gather(main_task: str, worker_results: List[Dict[str, str]]) -> str:
             func_name = tc.function.name
             func_args = json.loads(tc.function.arguments)
             tool_result = call_tool(func_name, func_args)
-            print(f"\n🔧 [Gather]调用工具 {func_name} 参数:{func_args}")
-            print(f"🔧 [Gather]工具返回：{tool_result}")
+            safe_print(f"\n🔧 [Gather]调用工具 {func_name} 参数:{func_args}")
+            safe_print(f"🔧 [Gather]工具返回：{tool_result}")
             messages.append(msg)
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": tool_result})
         final_resp = client.chat.completions.create(model=MODEL, messages=messages)
@@ -198,16 +212,16 @@ class SwarmQueen:
         return arr
 
     def run_swarm(self, main_task: str) -> Dict[str, Any]:
-        print(f"\n👑 Queen收到总任务：{main_task}")
+        safe_print(f"\n👑 Queen收到总任务：{main_task}")
         sub_tasks = self.split_task(main_task)
-        print(f"👑 拆分子任务列表：{sub_tasks}")
+        safe_print(f"👑 拆分子任务列表：{sub_tasks}")
         worker_outputs = []
         for idx, st in enumerate(sub_tasks):
-            print(f"\n🤖 Worker-{idx+1}开始执行：{st}")
+            safe_print(f"\n🤖 Worker-{idx+1}开始执行：{st}")
             res = run_worker(st)
             worker_outputs.append({"sub_task": st, "result": res})
         final_result = run_gather(main_task, worker_outputs)
-        print("\n👑 ===全部任务执行完毕===")
+        safe_print("\n👑 ===全部任务执行完毕===")
         save_task_record(main_task, sub_tasks, final_result)
         return {
             "main_task": main_task,
@@ -223,7 +237,7 @@ if __name__ == "__main__":
 
     try:
         out = queen.run_swarm(user_task)
-        print("\n======== 📃最终结果 ========")
-        print(out["final_result"])
+        safe_print("\n======== 📃最终结果 ========")
+        safe_print(out["final_result"])
     except Exception as err:
-        print(f"\n❌程序发生错误：{err}")
+        safe_print(f"\n❌程序发生错误：{err}")
